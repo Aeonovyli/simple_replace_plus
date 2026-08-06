@@ -6,6 +6,8 @@ local selected_node={}
 local delete_mode={}
 local undo_stack = {}
 local redo_stack = {}
+local waterfill = {}
+local waterdelete = {}
 local MAX_HISTORY = 64
 
 local function sort_pos(p1,p2)
@@ -186,5 +188,38 @@ minetest.register_chatcommand("redo", {
         vm:set_data(data)
         vm:write_to_map()
         return true, "Action redone."
+    end
+})
+
+minetest.register_chatcommand("waterdelete", {
+    description = "Delete all liquids within pos1 and pos2",
+    privs = {server = true},
+    func = function(name)
+        if not pos1[name] or not pos2[name] then return false, "Set pos1 and pos2 first." end
+        local p1, p2 = sort_pos(pos1[name], pos2[name])
+        local function filter(cid)
+            local n = minetest.get_name_from_content_id(cid)
+            local def = minetest.registered_nodes[n]
+            return def and def.liquidtype and def.liquidtype ~= "none"
+        end
+        replace_area(name, p1, p2, filter, "air")
+        return true, "Deleted all liquids within the selected area"
+    end
+})
+
+minetest.register_chatcommand("waterfill", {
+    description = "Fill selected area, replacing only liquids",
+    privs = {server = true},
+    func = function(name)
+        if not pos1[name] or not pos2[name] then return false, "Set pos1 and pos2 first." end
+        if not selected_node[name] then return false, "Use /setnode first." end
+        local p1, p2 = sort_pos(pos1[name], pos2[name])
+        local function filter(cid)
+            local n = minetest.get_name_from_content_id(cid)
+            local def = minetest.registered_nodes[n]
+            return def and def.liquidtype and def.liquidtype ~= "none"
+        end
+        replace_area(name, p1, p2, filter, selected_node[name])
+        return true, "Replaced all liquids with " .. selected_node[name]
     end
 })
