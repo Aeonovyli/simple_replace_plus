@@ -313,3 +313,112 @@ minetest.register_chatcommand("waterfill", {
         return true, "Replaced all liquids with " .. selected_node[name]
     end
 })
+
+minetest.register_chatcommand("copy", {
+    privs = {server = true},
+    func = function(name)
+        if not pos1[name] or not pos2[name] then return false, "Set /pos1 and /pos2 first." end
+        local p = minetest.get_player_by_name(name)
+        if not p then return false, "Player not found." end
+        local p1, p2 = sort_pos(pos1[name], pos2[name])
+        local origin_pos = pos1[name]
+        local vm = minetest.get_voxel_manip()
+        local minp, maxp = vm:read_from_map(p1, p2)
+        local area = VoxelArea:new({MinEdge = minp, MaxEdge = maxp})
+        local data = vm:get_data()
+        local param1 = vm:get_light_data()
+        local param2 = vm:get_param2_data()
+        local nodes_list = {}
+        local count = 0
+        for z = p1.z, p2.z do
+            for y = p1.y, p2.y do
+                for x = p1.x, p2.x do
+                    local i = area:index(x, y, z)
+                    count = count + 1
+                    nodes_list[count] = {
+                        offset = vector.new(x - origin_pos.x, y - origin_pos.y, z - origin_pos.z),
+                        data = data[i],
+                        param1 = param1[i],
+                        param2 = param2[i]
+                    }
+                end
+            end
+        end
+        fill[name] = nodes_list
+        return true, "Copied " .. count .. " nodes to structural clipboard."
+    end
+})
+
+minetest.register_chatcommand("paste", {
+    privs = {server = true},
+    func = function(name)
+        local nodes_list = fill[name]
+        if not nodes_list or type(nodes_list) ~= "table" or #nodes_list == 0 then
+            return false, "Clipboard is empty. Run /copy first."
+        end
+        local p = minetest.get_player_by_name(name)
+        if not p then return false, "Player not found." end
+        local player_pos = vector.round(p:get_pos())
+        local min_offset = vector.new(math.huge, math.huge, math.huge)
+        local max_offset = vector.new(-math.huge, -math.huge, -math.huge)
+        for _, entry in ipairs(nodes_list) do
+            min_offset.x = math.min(min_offset.x, entry.offset.x)
+            min_offset.y = math.min(min_offset.y, entry.offset.y)
+            min_offset.z = math.min(min_offset.z, entry.offset.z)
+            max_offset.x = math.max(max_offset.x, entry.offset.x)
+            max_offset.y = math.max(max_offset.y, entry.offset.y)
+            max_offset.z = math.max(max_offset.z, entry.offset.z)
+        end
+        local p1 = vector.add(player_pos, min_offset)
+        local p2 = vector.add(player_pos, max_offset)
+        local vm = minetest.get_voxel_manip()
+        local minp, maxp = vm:read_from_map(p1, p2)
+        local area = VoxelArea:new({MinEdge = minp, MaxEdge = maxp})
+        local data = vm:get_data()
+        local param1 = vm:get_light_data()
+        local param2 = vm:get_param2_data()
+        local indices = {}
+        local old_nodes = {}
+        local old_param1 = {}
+        local old_param2 = {}
+        local new_nodes = {}
+        local new_param1 = {}
+        local new_param2 = {}
+        for idx, entry in ipairs(nodes_list) do
+            local absolute_pos = vector.add(player_pos, entry.offset)
+            local i = area:index(absolute_pos.x, absolute_pos.y, absolute_pos.z)
+            indices[idx] = i
+            old_nodes[idx] = data[i]
+            old_param1[idx] = param1[i]
+            old_param2[idx] = param2[i]
+            data[i] = entry.data
+            param1[i] = entry.param1
+            param2[i] = entry.param2
+            new_nodes[idx] = entry.data
+            new_param1[idx] = entry.param1
+            new_param2[idx] = entry.param2
+        end
+        vm:set_data(data)
+        vm:set_light_data(param1)
+        vm:set_param2_data(param2)
+        vm:write_to_map()
+        undo_stack[name] = undo_stack[name] or {}
+        redo_stack[name] = {}
+        table.insert(undo_stack[name], {
+            action_type = "paste",
+            p1 = p1,
+            p2 = p2,
+            indices = indices,
+            old_nodes = old_nodes,
+            old_param1 = old_param1,
+            old_param2 = old_param2,
+            new_nodes = new_nodes,
+            new_param1 = new_param1,
+            new_param2 = new_param2
+        })
+        if #undo_stack[name] > MAX_HISTORY then
+            table.remove(undo_stack[name], 1)
+        end
+        return true, "Successfully pasted " .. #nodes_list .. " nodes relative to your location."
+    end
+})
