@@ -83,112 +83,202 @@ minetest.register_chatcommand("pos2",{
 
 minetest.register_chatcommand("setnode",{
  privs={server=true},
- func=function(name)
+ params="<node_name>",
+ description="Select a node to replace with.",
+ func=function(name,param)
   local p=minetest.get_player_by_name(name)
-  if not p then return end
-  local item=p:get_wielded_item()
-  if item:is_empty() then return false,"Hold a node in your hand." end
-  local n=item:get_name()
-  if not minetest.registered_nodes[n] then return false,"That item is not a placeable node." end
-  selected_node[name]=n
-  return true,"Selected node: "..selected_node[name]
+  if not p then return false,"Player not found." end
+  if param=="" then return false,"Specify a node." end
+  if not minetest.registered_nodes[param] then return false,"Not a registered node." end
+  selected_node[name]=param
+  return true,"Selected node: "..param
  end
 })
 
 minetest.register_chatcommand("fill",{
- description="Fill selected area",
  privs={server=true},
- func=function(name)
+ params="<from> <to>",
+ description="Fill selected area",
+ func=function(name,param)
   if not pos1[name] or not pos2[name] then return false,"Set pos1 and pos2 first." end
-  if not selected_node[name] then return false,"Use /setnode first." end
+  local a,b=param:match("([^ ]+) ([^ ]+)")
+  local from,to
+  if a and b then
+   if not minetest.registered_nodes[a] then return false,"Not a registered node: "..a end
+   if not minetest.registered_nodes[b] then return false,"Not a registered node: "..b end
+   from=a
+   to=b
+  elseif param~="" then
+   if not minetest.registered_nodes[param] then return false,"Not a registered node: "..param end
+   selected_node[name]=param
+   from="*"
+   to=param
+  else
+   if not selected_node[name] then return false,"Use /setnode first." end
+   from="*"
+   to=selected_node[name]
+  end
   local p1,p2=sort_pos(pos1[name],pos2[name])
   local function filter(cid)
-   local n=minetest.get_name_from_content_id(cid)
-   return n~="air" and not n:find("water")
+   if from=="*" then
+    local n=minetest.get_name_from_content_id(cid)
+    return n~="air" and not n:find("water")
+   end
+   return minetest.get_name_from_content_id(cid)==from
   end
-  replace_area(name, p1, p2, filter, selected_node[name])
+  replace_area(name,p1,p2,filter,to)
   fill[name]=true
-  return true,"Filled area with "..selected_node[name]
+  return true,"Filled area with "..to
  end
 })
 
 minetest.register_chatcommand("airfill",{
- description="Fill selected area, including air",
  privs={server=true},
- func=function(name)
+ params="<from> <to>",
+ description="Fill selected area, including air",
+ func=function(name,param)
   if not pos1[name] or not pos2[name] then return false,"Set pos1 and pos2 first." end
-  if not selected_node[name] then return false,"Use /setnode first." end
+  local a,b=param:match("([^ ]+) ([^ ]+)")
+  local from,to
+  if a and b then
+   if not minetest.registered_nodes[a] then return false,"Not a registered node: "..a end
+   if not minetest.registered_nodes[b] then return false,"Not a registered node: "..b end
+   from=a
+   to=b
+  elseif param~="" then
+   if not minetest.registered_nodes[param] then return false,"Not a registered node: "..param end
+   selected_node[name]=param
+   from="*"
+   to=param
+  else
+   if not selected_node[name] then return false,"Use /setnode first." end
+   from="*"
+   to=selected_node[name]
+  end
   local p1,p2=sort_pos(pos1[name],pos2[name])
   local function filter(cid)
    return true
   end
-  replace_area(name, p1, p2, filter, selected_node[name])
+  replace_area(name,p1,p2,filter,to)
   airfill[name]=true
-  return true,"Filled area with "..selected_node[name]
+  return true,"Filled area with "..to
  end
 })
 
-minetest.register_chatcommand("delete", {
-    description = "Delete all blocks within pos1 and pos2",
-    privs = {server = true},
-    func = function(name)
-        if not pos1[name] or not pos2[name] then return false, "Set pos1 and pos2 first." end
-        local p1, p2 = sort_pos(pos1[name], pos2[name])
-        local function filter(cid)
-            local n = minetest.get_name_from_content_id(cid)
-            return n ~= "air" and not n:find("water")
-        end
-        replace_area(name, p1, p2, filter, "air")
-        delete_mode[name] = true
-        return true, "Deleted nodes within the selected area"
-    end
+minetest.register_chatcommand("delete",{
+ privs={server=true},
+ params="<node_name>",
+ description="Delete blocks within pos1 and pos2",
+ func=function(name,param)
+  if not pos1[name] or not pos2[name] then return false,"Set pos1 and pos2 first." end
+  local p1,p2=sort_pos(pos1[name],pos2[name])
+  if param~="" then
+   if not minetest.registered_nodes[param] then return false,"Not a registered node." end
+   local target=param
+   local function filter(cid)
+    return minetest.get_name_from_content_id(cid)==target
+   end
+   replace_area(name,p1,p2,filter,"air")
+   delete_mode[name]=true
+   return true,"Deleted "..target.." within the selected area"
+  end
+  local function filter(cid)
+   local n=minetest.get_name_from_content_id(cid)
+   return n~="air" and not n:find("water")
+  end
+  replace_area(name,p1,p2,filter,"air")
+  delete_mode[name]=true
+  return true,"Deleted nodes within the selected area"
+ end
 })
 
-minetest.register_chatcommand("undo", {
-    privs = {server = true},
-    func = function(name)
-        local stack = undo_stack[name]
-        if not stack or #stack == 0 then
-            return false, "Nothing to undo."
-        end
-        local action = table.remove(stack)
-        redo_stack[name] = redo_stack[name] or {}
-        redo_stack[name][#redo_stack[name]+1] = action
-        local vm = minetest.get_voxel_manip()
-        local minp, maxp = vm:read_from_map(action.p1, action.p2)
-        local area = VoxelArea:new({MinEdge = minp, MaxEdge = maxp})
-        local data = vm:get_data()
-        for idx = 1, #action.indices do
-            local i = action.indices[idx]
-            data[i] = action.old_nodes[idx]
-        end
-        vm:set_data(data)
-        vm:write_to_map()
-        return true, "Nodes changed are reverted."
-    end
+minetest.register_chatcommand("undo",{
+ privs={server=true},
+ func=function(name)
+  local stack=undo_stack[name]
+  if not stack or #stack==0 then return false,"Nothing to undo." end
+  local action=table.remove(stack)
+  redo_stack[name]=redo_stack[name] or {}
+  redo_stack[name][#redo_stack[name]+1]=action
+  local vm=minetest.get_voxel_manip()
+  local minp,maxp=vm:read_from_map(action.p1,action.p2)
+  local area=VoxelArea:new({MinEdge=minp,MaxEdge=maxp})
+  local data=vm:get_data()
+  for idx=1,#action.indices do
+   local i=action.indices[idx]
+   data[i]=action.old_nodes[idx]
+  end
+  vm:set_data(data)
+  vm:write_to_map()
+  return true,"Nodes changed are reverted."
+ end
 })
-minetest.register_chatcommand("redo", {
-    privs = {server = true},
-    func = function(name)
-        local stack = redo_stack[name]
-        if not stack or #stack == 0 then
-            return false, "Nothing to redo."
-        end
-        local action = table.remove(stack)
-        undo_stack[name] = undo_stack[name] or {}
-        undo_stack[name][#undo_stack[name]+1] = action
-        local vm = minetest.get_voxel_manip()
-        local minp, maxp = vm:read_from_map(action.p1, action.p2)
-        local area = VoxelArea:new({MinEdge = minp, MaxEdge = maxp})
-        local data = vm:get_data()
-        for idx = 1, #action.indices do
-            local i = action.indices[idx]
-            data[i] = action.new_nodes[idx]
-        end
-        vm:set_data(data)
-        vm:write_to_map()
-        return true, "Action redone."
-    end
+
+minetest.register_chatcommand("redo",{
+ privs={server=true},
+ func=function(name)
+  local stack=redo_stack[name]
+  if not stack or #stack==0 then return false,"Nothing to redo." end
+  local action=table.remove(stack)
+  undo_stack[name]=undo_stack[name] or {}
+  undo_stack[name][#undo_stack[name]+1]=action
+  local vm=minetest.get_voxel_manip()
+  local minp,maxp=vm:read_from_map(action.p1,action.p2)
+  local area=VoxelArea:new({MinEdge=minp,MaxEdge=maxp})
+  local data=vm:get_data()
+  for idx=1,#action.indices do
+   local i=action.indices[idx]
+   data[i]=action.new_nodes[idx]
+  end
+  vm:set_data(data)
+  vm:write_to_map()
+  return true,"Action redone."
+ end
+})
+
+
+minetest.register_chatcommand("undo",{
+ privs={server=true},
+ func=function(name)
+  local stack=undo_stack[name]
+  if not stack or #stack==0 then return false,"Nothing to undo." end
+  local action=table.remove(stack)
+  redo_stack[name]=redo_stack[name] or {}
+  redo_stack[name][#redo_stack[name]+1]=action
+  local vm=minetest.get_voxel_manip()
+  local minp,maxp=vm:read_from_map(action.p1,action.p2)
+  local area=VoxelArea:new({MinEdge=minp,MaxEdge=maxp})
+  local data=vm:get_data()
+  for idx=1,#action.indices do
+   local i=action.indices[idx]
+   data[i]=action.old_nodes[idx]
+  end
+  vm:set_data(data)
+  vm:write_to_map()
+  return true,"Nodes changed are reverted."
+ end
+})
+
+minetest.register_chatcommand("redo",{
+ privs={server=true},
+ func=function(name)
+  local stack=redo_stack[name]
+  if not stack or #stack==0 then return false,"Nothing to redo." end
+  local action=table.remove(stack)
+  undo_stack[name]=undo_stack[name] or {}
+  undo_stack[name][#undo_stack[name]+1]=action
+  local vm=minetest.get_voxel_manip()
+  local minp,maxp=vm:read_from_map(action.p1,action.p2)
+  local area=VoxelArea:new({MinEdge=minp,MaxEdge=maxp})
+  local data=vm:get_data()
+  for idx=1,#action.indices do
+   local i=action.indices[idx]
+   data[i]=action.new_nodes[idx]
+  end
+  vm:set_data(data)
+  vm:write_to_map()
+  return true,"Action redone."
+ end
 })
 
 minetest.register_chatcommand("waterdelete", {
