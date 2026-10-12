@@ -22,15 +22,24 @@ local function sort_pos(p1,p2)
  }
 end
 
+local function is_liquid_content_id(content_id)
+    local node_name = minetest.get_name_from_content_id(content_id)
+    local def = minetest.registered_nodes[node_name]
+    return def ~= nil and def.liquidtype ~= nil and def.liquidtype ~= "none"
+end
+
 local function replace_area(name, p1, p2, filter, newnode)
     local vm = minetest.get_voxel_manip()
     local minp, maxp = vm:read_from_map(p1, p2)
     local area = VoxelArea:new({MinEdge = minp, MaxEdge = maxp})
     local data = vm:get_data()
+    local param2 = vm:get_param2_data()
     local cid_new = minetest.get_content_id(newnode)
     local indices = {}
     local old_nodes = {}
+    local old_param2 = {}
     local new_nodes = {}
+    local new_param2 = {}
     for z = p1.z, p2.z do
         for y = p1.y, p2.y do
             for x = p1.x, p2.x do
@@ -39,13 +48,17 @@ local function replace_area(name, p1, p2, filter, newnode)
                 if filter(old) then
                     indices[#indices+1] = i
                     old_nodes[#old_nodes+1] = old
+                    old_param2[#old_param2+1] = param2[i]
                     data[i] = cid_new
+                    param2[i] = 0
                     new_nodes[#new_nodes+1] = cid_new
+                    new_param2[#new_param2+1] = 0
                 end
             end
         end
     end
     vm:set_data(data)
+    vm:set_param2_data(param2)
     vm:write_to_map()
     undo_stack[name] = undo_stack[name] or {}
     redo_stack[name] = {}
@@ -54,7 +67,9 @@ local function replace_area(name, p1, p2, filter, newnode)
         p2 = vector.new(p2),
         indices = indices,
         old_nodes = old_nodes,
-        new_nodes = new_nodes
+        old_param2 = old_param2,
+        new_nodes = new_nodes,
+        new_param2 = new_param2
     }
     if #undo_stack[name] > MAX_HISTORY then
         table.remove(undo_stack[name], 1)
@@ -126,7 +141,7 @@ minetest.register_chatcommand("fill",{
   local function filter(cid)
    if from=="*" then
     local n=minetest.get_name_from_content_id(cid)
-    return n~="air" and not n:find("water")
+        return n~="air" and not is_liquid_content_id(cid)
    end
    return minetest.get_name_from_content_id(cid)==from
   end
@@ -188,7 +203,7 @@ minetest.register_chatcommand("delete",{
   end
   local function filter(cid)
    local n=minetest.get_name_from_content_id(cid)
-   return n~="air" and not n:find("water")
+    return n~="air" and not is_liquid_content_id(cid)
   end
   replace_area(name,p1,p2,filter,"air")
   delete_mode[name]=true
@@ -208,11 +223,17 @@ minetest.register_chatcommand("undo",{
   local minp,maxp=vm:read_from_map(action.p1,action.p2)
   local area=VoxelArea:new({MinEdge=minp,MaxEdge=maxp})
   local data=vm:get_data()
+    local param1=action.old_param1 and vm:get_light_data()
+    local param2=action.old_param2 and vm:get_param2_data()
   for idx=1,#action.indices do
    local i=action.indices[idx]
    data[i]=action.old_nodes[idx]
+     if param1 then param1[i]=action.old_param1[idx] end
+     if param2 then param2[i]=action.old_param2[idx] end
   end
   vm:set_data(data)
+    if param1 then vm:set_light_data(param1) end
+    if param2 then vm:set_param2_data(param2) end
   vm:write_to_map()
   return true,"Nodes changed are reverted."
  end
@@ -230,56 +251,17 @@ minetest.register_chatcommand("redo",{
   local minp,maxp=vm:read_from_map(action.p1,action.p2)
   local area=VoxelArea:new({MinEdge=minp,MaxEdge=maxp})
   local data=vm:get_data()
+    local param1=action.new_param1 and vm:get_light_data()
+    local param2=action.new_param2 and vm:get_param2_data()
   for idx=1,#action.indices do
    local i=action.indices[idx]
    data[i]=action.new_nodes[idx]
+     if param1 then param1[i]=action.new_param1[idx] end
+     if param2 then param2[i]=action.new_param2[idx] end
   end
   vm:set_data(data)
-  vm:write_to_map()
-  return true,"Action redone."
- end
-})
-
-
-minetest.register_chatcommand("undo",{
- privs={server=true},
- func=function(name)
-  local stack=undo_stack[name]
-  if not stack or #stack==0 then return false,"Nothing to undo." end
-  local action=table.remove(stack)
-  redo_stack[name]=redo_stack[name] or {}
-  redo_stack[name][#redo_stack[name]+1]=action
-  local vm=minetest.get_voxel_manip()
-  local minp,maxp=vm:read_from_map(action.p1,action.p2)
-  local area=VoxelArea:new({MinEdge=minp,MaxEdge=maxp})
-  local data=vm:get_data()
-  for idx=1,#action.indices do
-   local i=action.indices[idx]
-   data[i]=action.old_nodes[idx]
-  end
-  vm:set_data(data)
-  vm:write_to_map()
-  return true,"Nodes changed are reverted."
- end
-})
-
-minetest.register_chatcommand("redo",{
- privs={server=true},
- func=function(name)
-  local stack=redo_stack[name]
-  if not stack or #stack==0 then return false,"Nothing to redo." end
-  local action=table.remove(stack)
-  undo_stack[name]=undo_stack[name] or {}
-  undo_stack[name][#undo_stack[name]+1]=action
-  local vm=minetest.get_voxel_manip()
-  local minp,maxp=vm:read_from_map(action.p1,action.p2)
-  local area=VoxelArea:new({MinEdge=minp,MaxEdge=maxp})
-  local data=vm:get_data()
-  for idx=1,#action.indices do
-   local i=action.indices[idx]
-   data[i]=action.new_nodes[idx]
-  end
-  vm:set_data(data)
+    if param1 then vm:set_light_data(param1) end
+    if param2 then vm:set_param2_data(param2) end
   vm:write_to_map()
   return true,"Action redone."
  end
