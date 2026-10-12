@@ -83,15 +83,19 @@ minetest.register_chatcommand("pos2",{
 
 minetest.register_chatcommand("setnode",{
  privs={server=true},
- params="<node_name>",
- description="Select a node to replace with.",
+ params="[<node_name>]",
+ description="Select a replacement node by name or from your hand.",
  func=function(name,param)
   local p=minetest.get_player_by_name(name)
   if not p then return false,"Player not found." end
-  if param=="" then return false,"Specify a node." end
-  if not minetest.registered_nodes[param] then return false,"Not a registered node." end
-  selected_node[name]=param
-  return true,"Selected node: "..param
+    local node_name=param
+    if node_name=="" then
+     node_name=p:get_wielded_item():get_name()
+     if node_name=="" then return false,"No node in hand." end
+    end
+    if not minetest.registered_nodes[node_name] then return false,"Not a placeable node: "..node_name end
+    selected_node[name]=node_name
+    return true,"Selected node: "..node_name
  end
 })
 
