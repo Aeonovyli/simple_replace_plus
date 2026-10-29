@@ -408,3 +408,5 @@ minetest.register_chatcommand("paste", {
         return true, "Successfully pasted " .. #nodes_list .. " nodes relative to your location."
     end
 })
+
+dofile(minetest.get_modpath("simple_replace_plus") .. "/storage.lua")
